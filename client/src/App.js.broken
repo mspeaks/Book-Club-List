@@ -1,0 +1,906 @@
+import React, { useEffect, useState } from 'react';
+import TopicAutocomplete from './TopicAutocomplete';
+import BookAutocomplete from './BookAutocomplete';
+import './Card.css';
+
+const API_BASE = 'http://localhost:4000';
+
+function App() {
+  // --- User login state ---
+  const [user, setUser] = useState(() => {
+    const u = window.localStorage.getItem('user');
+    return u ? JSON.parse(u) : null;
+  });
+  const [loginName, setLoginName] = useState('');
+  const [users, setUsers] = useState([]);
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerName, setRegisterName] = useState('');
+  const [books, setBooks] = useState([]);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [topics, setTopics] = useState([]);
+  const [filter, setFilter] = useState('');
+  const [form, setForm] = useState({ title: '', author: '', description: '', link: '', recommended_by: '', topics: [] });
+  const [bookCover, setBookCover] = useState('');
+  const [suggestedTopics, setSuggestedTopics] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [myBooks, setMyBooks] = useState([]);
+  const [myVotes, setMyVotes] = useState([]);
+  const [myStatuses, setMyStatuses] = useState([]);
+  const [bookComments, setBookComments] = useState({});
+  const [commentText, setCommentText] = useState('');
+  const [loadingComments, setLoadingComments] = useState(false);
+
+  // Fetch users
+  const fetchUsers = async () => {
+    const res = await fetch(`${API_BASE}/users`);
+    const data = await res.json();
+    setUsers(data);
+  };
+
+  // Fetch user-specific books and votes
+  const fetchUserSpecific = async (userId) => {
+    if (!userId) {
+      setMyBooks([]);
+      setMyVotes([]);
+      setMyStatuses([]);
+      return;
+    }
+    const [booksRes, votesRes, statusesRes] = await Promise.all([
+      fetch(`${API_BASE}/users/${userId}/books`),
+      fetch(`${API_BASE}/users/${userId}/votes`),
+      fetch(`${API_BASE}/users/${userId}/statuses`)
+    ]);
+    setMyBooks(await booksRes.json());
+    setMyVotes(await votesRes.json());
+    setMyStatuses(await statusesRes.json());
+  };
+
+  // Login handler
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!loginName) return;
+    const res = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: loginName }),
+    });
+    if (res.status === 404) {
+      alert('User not found. Please register.');
+      return;
+    }
+    const data = await res.json();
+    setUser(data);
+    window.localStorage.setItem('user', JSON.stringify(data));
+    setLoginName('');
+    fetchUserSpecific(data.id);
+  };
+
+
+  // Register handler
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (!registerName.trim()) return;
+    const res = await fetch(`${API_BASE}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: registerName.trim() }),
+    });
+    if (res.status !== 201) {
+      const err = await res.json();
+      alert(err.error || 'Registration failed');
+      return;
+    }
+    const data = await res.json();
+    setUsers((prev) => [...prev, data]);
+    setShowRegister(false);
+    setRegisterName('');
+    setLoginName(data.name);
+    alert('Registration successful! You can now log in.');
+  };
+
+
+  // Logout handler
+  const handleLogout = () => {
+    setUser(null);
+    window.localStorage.removeItem('user');
+    setMyBooks([]);
+    setMyVotes([]);
+    setMyStatuses([]);
+    setBookComments({});
+  };
+
+  // Fetch books
+  const fetchBooks = async () => {
+    setLoading(true);
+    const res = await fetch(`${API_BASE}/books`);
+    const data = await res.json();
+    setBooks(data);
+    setLoading(false);
+  };
+
+
+  // Maps Google Books categories to the app's topic IDs
+  const mapCategoriesToTopicIds = (categories, appTopics) => {
+    if (!categories || !Array.isArray(categories) || categories.length === 0) {
+      return [];
+    }
+
+    // Normalize categories (lowercase, split into words)
+    const normalizedCategories = categories.flatMap(category => 
+      category.toLowerCase().split(/[\s&,\/]+/)
+    );
+
+    // Common category keywords to look for
+    const categoryKeywords = [
+      'fiction', 'nonfiction', 'science', 'fantasy', 'mystery', 'thriller',
+      'romance', 'horror', 'biography', 'history', 'business', 'self-help',
+      'philosophy', 'travel', 'art', 'cooking', 'health', 'religion',
+      'technology', 'programming', 'education', 'children'
+    ];
+
+    // Find topics that match with any of the category keywords
+    const matchedTopicIds = appTopics
+      .filter(topic => {
+        const topicName = topic.name.toLowerCase();
+        // Check if any of the keywords are in the topic name
+        return categoryKeywords.some(keyword => topicName.includes(keyword)) ||
+          // Or check if any normalized category words match the topic name
+          normalizedCategories.some(catWord => 
+            topicName.includes(catWord) || catWord.includes(topicName)
+          );
+      })
+      .map(topic => topic.id);
+
+    return matchedTopicIds;
+  };
+
+  // Fetch topics
+  const fetchTopics = async () => {
+    const res = await fetch(`${API_BASE}/topics`);
+    const data = await res.json();
+    setTopics(data);
+  };
+
+  useEffect(() => {
+    fetchBooks();
+    fetchTopics();
+    fetchUsers();
+  }, []);
+
+  // When user logs in, fetch their books and votes
+  useEffect(() => {
+    if (user && user.id) {
+      fetchUserSpecific(user.id);
+    }
+  }, [user]);
+
+  // Handle book form submit
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    console.log('Form submission attempted with:', { form, user });
+    
+    // Check validation conditions
+    if (!form.title) {
+      console.log('Submission blocked: Missing title');
+      return;
+    }
+    if (!form.author) {
+      console.log('Submission blocked: Missing author');
+      return;
+    }
+    if (form.topics.length === 0) {
+      console.log('Submission blocked: No topics selected');
+      return;
+    }
+    if (!user) {
+      console.log('Submission blocked: User not logged in');
+      return;
+    }
+    
+    console.log('Validation passed, attempting to submit book...');
+    
+    try {
+      const response = await fetch(`${API_BASE}/books`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ...form, 
+          recommended_by: user.name,
+          cover: bookCover,
+          user_id: user.id // Adding user_id for backend tracking
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error submitting book:', response.status, errorData);
+        alert(`Failed to submit book: ${response.status} ${response.statusText}`);
+        return;
+      }
+      
+      console.log('Book submitted successfully!');
+
+      
+      // Reset form
+      setForm({ title: '', author: '', description: '', link: '', recommended_by: '', topics: [] });
+      setBookCover('');
+      setSuggestedTopics([]);
+      setSuccessMsg('Book recommended successfully!');
+      fetchBooks();
+    } catch (error) {
+      console.error('Exception when submitting book:', error);
+      alert('Error submitting book. Please try again.');
+    }
+  };
+
+
+  // Handle voting
+  const handleVote = async (bookId) => {
+    if (!user) return;
+    const voted = myVotes.some(v => v.book_id === bookId);
+    if (voted) {
+      await fetch(`${API_BASE}/books/${bookId}/vote`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voter_id: user.id }),
+      });
+    } else {
+      await fetch(`${API_BASE}/books/${bookId}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voter_id: user.id }),
+      });
+    }
+    fetchBooks();
+    fetchUserSpecific(user.id);
+  };
+
+  // Fetch comments for a book
+  const fetchComments = async (bookId) => {
+    if (!bookComments[bookId]) {
+      setLoadingComments(true);
+      try {
+        const res = await fetch(`${API_BASE}/books/${bookId}/comments`);
+        const data = await res.json();
+        setBookComments(prev => ({ ...prev, [bookId]: data }));
+      } catch (error) {
+        console.error('Error fetching comments:', error);
+      } finally {
+        setLoadingComments(false);
+      }
+    }
+  };
+
+  // Add a new comment
+  const addComment = async (bookId, content) => {
+    if (!user || !content.trim()) return;
+    
+    try {
+      const res = await fetch(`${API_BASE}/books/${bookId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, content: content.trim() }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to add comment');
+      
+      const newComment = await res.json();
+      setBookComments(prev => ({
+        ...prev,
+        [bookId]: [newComment, ...(prev[bookId] || [])]
+      }));
+      setCommentText('');
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      alert('Failed to add comment. Please try again.');
+    }
+  };
+
+  // Delete a comment
+  const deleteComment = async (bookId, commentId) => {
+    if (!user) return;
+    
+    try {
+      const res = await fetch(`${API_BASE}/books/${bookId}/comments/${commentId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to delete comment');
+      }
+      
+      setBookComments(prev => ({
+        ...prev,
+        [bookId]: prev[bookId].filter(c => c.id !== commentId)
+      }));
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+      alert(error.message || 'Failed to delete comment. Please try again.');
+    }
+  };
+
+  // Handle book status (already_read, skimmed, want_to_read, reading_now)
+  const handleStatus = async (bookId, status) => {
+    if (!user) return;
+    const hasStatus = myStatuses.some(s => s.book_id === bookId && s.status === status); // supports reading_now, already_read, skimmed, want_to_read
+    if (hasStatus) {
+      await fetch(`${API_BASE}/books/${bookId}/status`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, status }),
+      });
+    } else {
+      await fetch(`${API_BASE}/books/${bookId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, status }),
+      });
+    }
+    fetchBooks();
+    fetchUserSpecific(user.id);
+  };
+
+  // Handle topic checkbox
+  const handleTopicChange = (topicId) => {
+    setForm((prev) => {
+      const topics = prev.topics.includes(topicId)
+        ? prev.topics.filter((id) => id !== topicId)
+        : [...prev.topics, topicId];
+      return { ...prev, topics };
+    });
+  };
+
+  // Filter books
+  const filteredBooks = filter
+    ? books.filter((b) => b.topics.includes(topics.find((t) => t.id === Number(filter))?.name))
+    : books;
+
+  return (
+    <div style={{ backgroundColor: '#f5f7fa' }}>
+      <div style={{ maxWidth: 700, margin: '2rem auto', padding: 20 }}>
+        <h1>Book Club</h1>
+        {/* --- Login UI --- */}
+        {!user ? (
+          <div className="card">
+            {!showRegister ? (
+              <div style={{ display: 'inline-block', marginRight: 10 }}>
+                <select
+                  value={loginName}
+                  onChange={async e => {
+                    const name = e.target.value;
+                    setLoginName(name);
+                    if (name) {
+                      const res = await fetch(`${API_BASE}/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name }),
+                      });
+                      if (res.status === 404) {
+                        alert('User not found. Please register.');
+                        return;
+                      }
+                      const data = await res.json();
+                      setUser(data);
+                      window.localStorage.setItem('user', JSON.stringify(data));
+                      setLoginName('');
+                      fetchUserSpecific(data.id);
+                    }
+                  }}
+                  required
+                  style={{ marginRight: 8 }}
+                >
+                  <option value="">Select your name</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.name}>{u.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowRegister(true)}
+                  style={{
+                    marginLeft: 8,
+                    background: '#1976d2',
+                    color: '#fff',
+                    fontWeight: 'bold',
+                    border: 'none',
+                    borderRadius: 4,
+                    padding: '6px 12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Register if you are a new user
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleRegister} style={{ display: 'inline-block', marginRight: 10 }}>
+                <input
+                  placeholder="Enter new name"
+                  value={registerName}
+                  onChange={e => setRegisterName(e.target.value)}
+                  required
+                  style={{ marginRight: 8 }}
+                />
+                <button type="submit">Register</button>
+                <button type="button" onClick={() => setShowRegister(false)} style={{ marginLeft: 8 }}>Cancel</button>
+              </form>
+            )}
+          </div>
+        ) : (
+          <>
+          <div className="card welcome-section">
+            <div>Welcome, <b>{user.name}</b>!</div> 
+            <button onClick={handleLogout}>Log out</button>
+            <div className="card">
+              <h2>Your Books</h2>
+              {(!Array.isArray(myBooks) || myBooks.length === 0) ? <div><i>No recommendations yet.</i></div> : (
+                <ul>
+                  {myBooks.map(book => (
+                    <li key={book.id}>
+                      <b>{book.title}</b> by {book.author} {book.topics.length > 0 && (<span>({book.topics.join(', ')})</span>)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            
+            <div className="card">
+              <h2>Books you voted for us to discuss</h2>
+              {(!Array.isArray(myVotes) || myVotes.length === 0) ? (
+                <div><i>No votes yet.</i></div>
+              ) : (
+                <ul>
+                  {myVotes.map(book => (
+                    <li key={book.id}>
+                      <b>{book.title}</b> by {book.author} {book.topics.length > 0 && (<span>({book.topics.join(', ')})</span>)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+          </div>
+        )}
+
+        <div className="card">
+          <h2>Recommend a Book</h2>
+          <form onSubmit={handleSubmit}>
+            <BookAutocomplete
+              value={form.title}
+              setValue={(title) => setForm(f => ({ ...f, title }))}
+              setBookDetails={(details) => {
+                setForm(f => ({
+                  ...f,
+                  author: details.author,
+                  description: details.description,
+                  link: details.link
+                }));
+                setBookCover(details.cover || '');
+                
+                // If the book has categories from Google Books API, store them directly
+                if (details.categories && details.categories.length > 0) {
+                  console.log('Categories found for this book:', details.categories);
+                  
+                  // Store the Google Books categories directly
+                  const bookCategories = details.categories;
+                  
+                  // For each category from Google Books, check if we need to create it in our system
+                  const createNewTopics = async () => {
+                    const newTopicIds = [];
+                    
+                    for (const category of bookCategories) {
+                      // Check if a similar topic already exists
+                      const existingTopic = topics.find(t => 
+                        t.name.toLowerCase() === category.toLowerCase() ||
+                        category.toLowerCase().includes(t.name.toLowerCase()) ||
+                        t.name.toLowerCase().includes(category.toLowerCase())
+                      );
+                      
+                      if (existingTopic) {
+                        // Use existing topic if there's a match
+                        newTopicIds.push(existingTopic.id);
+                      } else {
+                        try {
+                          // Create a new topic based on the Google Books category
+                          const res = await fetch(`${API_BASE}/topics`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: category })
+                          });
+                          
+                          if (res.ok) {
+                            const newTopic = await res.json();
+                            newTopicIds.push(newTopic.id);
+                            // Update local topics state
+                            setTopics(prev => [...prev, newTopic]);
+                          }
+                        } catch (error) {
+                          console.error('Error creating new topic:', error);
+                        }
+                      }
+                    }
+                    
+                    // Auto-select the topics
+                    if (newTopicIds.length > 0) {
+                      setForm(f => ({
+                        ...f,
+                        topics: [...new Set([...f.topics, ...newTopicIds])]
+                      }));
+                      
+                      // Store for UI indication
+                      setSuggestedTopics(newTopicIds);
+                    }
+                  };
+                  
+                  // Execute the async function
+                  createNewTopics();
+                }
+              }}
+              disabled={!user}
+            />
+            <textarea
+              placeholder="Description (optional)"
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              style={{ marginBottom: 8, width: '100%' }}
+              rows={3}
+              disabled={!user}
+            />
+            <input
+              placeholder="Author"
+              value={form.author}
+              onChange={e => setForm(f => ({ ...f, author: e.target.value }))}
+              required
+              style={{ marginBottom: 8, width: '100%' }}
+              disabled={!user}
+            />
+            <input
+              placeholder="Link (optional)"
+              value={form.link}
+              onChange={e => setForm(f => ({ ...f, link: e.target.value }))}
+              style={{ marginBottom: 8, width: '100%' }}
+              disabled={!user}
+            />
+          <div style={{ margin: '10px 0' }}>
+            <b>Topics:</b>{' '}
+            {suggestedTopics.length > 0 && (
+              <div style={{ 
+                backgroundColor: '#e3f2fd', 
+                padding: '6px 10px', 
+                borderRadius: '4px',
+                marginBottom: '6px',
+                fontSize: '0.85em'
+              }}>
+                <span role="img" aria-label="Suggestion">💡</span> Topics added from Google Books: 
+                <b>{topics.filter(t => suggestedTopics.includes(t.id)).map(t => t.name).join(', ')}</b>
+              </div>
+            )}
+            <TopicAutocomplete
+              selected={form.topics}
+              setSelected={ids => {
+                setForm(f => ({ ...f, topics: ids }));
+                // Clear suggestions once user manually changes topics
+                if (!ids.some(id => suggestedTopics.includes(id))) {
+                  setSuggestedTopics([]);
+                }
+              }}
+              disabled={!user}
+            />
+          </div>
+          <button type="submit" disabled={!user}>
+            Share Book
+          </button>
+        </form>
+        {/* Book list section */}
+        <div className="card">
+          <h2>Book List</h2>
+          {successMsg && (
+            <div style={{ background: '#e6ffe6', color: '#1b5e20', padding: '10px 18px', margin: '10px 0', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{successMsg}</span>
+              <button onClick={() => setSuccessMsg('')} style={{ background: 'none', border: 'none', color: '#1b5e20', cursor: 'pointer', fontWeight: 'bold', fontSize: 18 }}>&times;</button>
+            </div>
+          )}
+          {loading ? <div>Loading...</div> : (
+            <ul>
+              {/* Regular rendering if there are no books */}
+              {!filteredBooks || filteredBooks.length === 0 ? (
+                <li><i>No books yet. Be the first to recommend one!</i></li>
+              ) : (
+                /* Custom sorting for non-empty book list */
+                filteredBooks
+                  .slice() // Make a copy to avoid mutating original array
+                  .sort((a, b) => {
+                    // First by recency
+                    const dateA = new Date(a.created_at || 0);
+                    const dateB = new Date(b.created_at || 0);
+                    
+                    // Special case: if this is the most recent book, it's first
+                    if (dateA > dateB) return -1;
+                    if (dateB > dateA) return 1;
+                    
+                    // If dates are equal, sort by votes
+                    return b.votes - a.votes;
+                  })
+                  .map((book, index) => {
+                    // Second place is highest votes that isn't most recent
+                    if (index === 1 && filteredBooks.length > 2) {
+                      // Find highest votes book (excluding index 0)
+                      const highestVotesBook = [...filteredBooks]
+                        .filter(b => b.id !== filteredBooks[0].id)
+                        .sort((a, b) => b.votes - a.votes)[0];
+                      
+                      // If the book at index 1 isn't the highest votes book, swap
+                      if (highestVotesBook && highestVotesBook.id !== book.id) {
+                        // Find book in the array
+                        const highestIndex = filteredBooks.findIndex(b => b.id === highestVotesBook.id);
+                        if (highestIndex > 1) {
+                          const temp = filteredBooks[1];
+                          filteredBooks[1] = filteredBooks[highestIndex];
+                          filteredBooks[highestIndex] = temp;
+                          // Use the swapped book
+                          book = filteredBooks[1];
+                        }
+                      }
+      {loading ? <div>Loading...</div> : (
+        <ul>
+          {/* Regular rendering if there are no books */}
+          {!filteredBooks || filteredBooks.length === 0 ? (
+            <li><i>No books yet. Be the first to recommend one!</i></li>
+          ) : (
+            /* Custom sorting for non-empty book list */
+            filteredBooks
+              .slice() // Make a copy to avoid mutating original array
+              .sort((a, b) => {
+                // First by recency
+                const dateA = new Date(a.created_at || 0);
+                const dateB = new Date(b.created_at || 0);
+                
+                // Special case: if this is the most recent book, it's first
+                if (dateA > dateB) return -1;
+                if (dateB > dateA) return 1;
+                
+                // If dates are equal, sort by votes
+                return b.votes - a.votes;
+              })
+              .map((book, index) => {
+                // Second place is highest votes that isn't most recent
+                if (index === 1 && filteredBooks.length > 2) {
+                  // Find highest votes book (excluding index 0)
+                  const highestVotesBook = [...filteredBooks]
+                    .filter(b => b.id !== filteredBooks[0].id)
+                    .sort((a, b) => b.votes - a.votes)[0];
+                  
+                  // If the book at index 1 isn't the highest votes book, swap
+                  if (highestVotesBook && highestVotesBook.id !== book.id) {
+                    // Find book in the array
+                    const highestIndex = filteredBooks.findIndex(b => b.id === highestVotesBook.id);
+                    if (highestIndex > 1) {
+                      const temp = filteredBooks[1];
+                      filteredBooks[1] = filteredBooks[highestIndex];
+                      filteredBooks[highestIndex] = temp;
+                      // Use the swapped book
+                      book = filteredBooks[1];
+                    }
+                  }
+                }
+                
+                return (
+                  <li key={book.id} className="book-card" style={{ marginBottom: 18, borderBottom: '1px solid #eee', paddingBottom: 10 }}>
+                    <div className="book-cover" style={{ marginRight: '15px', minWidth: '100px' }}>
+                      {book.cover && <img src={book.cover} alt="Book cover" style={{ maxWidth: '100px', maxHeight: '150px' }} />}
+                    </div>
+                    <div>
+                      <b>{book.title}</b> by {book.author}
+                      {book.description && (
+                        <div>
+                          <i>{book.description.split(' ').slice(0, 25).join(' ')}{book.description.split(' ').length > 25 ? '...' : ''}</i>
+                        </div>
+                      )}
+                      {book.link && <div><a href={book.link} target="_blank" rel="noopener noreferrer">More info</a></div>}
+                      <div>Topics: {book.topics.join(', ')}</div>
+                      <div className="book-buttons" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                         <span>Votes: {book.votes}</span>
+                         <button
+                           onClick={() => handleVote(book.id)}
+                           disabled={!user}
+                           style={{ fontWeight: myVotes.some(v => v.book_id === book.id) ? 'bold' : 'normal', background: myVotes.some(v => v.book_id === book.id) ? '#b3e5fc' : undefined }}
+                         >{myVotes.some(v => v.book_id === book.id) ? 'Voted (Undo)' : 'Vote'}</button>
+                         <span>|</span>
+                         <button
+                           onClick={() => handleStatus(book.id, 'already_read')}
+                           disabled={!user}
+                           style={{
+                             background: myStatuses.some(s => s.book_id === book.id && s.status === 'already_read') ? '#c8e6c9' : '#eee',
+                             marginLeft: 4,
+                             fontWeight: myStatuses.some(s => s.book_id === book.id && s.status === 'already_read') ? 'bold' : 'normal'
+                           }}
+                         >{myStatuses.some(s => s.book_id === book.id && s.status === 'already_read') ? 'Already Read (Undo)' : 'Already Read'} ({book.already_read || 0})</button>
+                         <button
+                           onClick={() => handleStatus(book.id, 'reading_now')}
+                           disabled={!user}
+                           style={{
+                             background: myStatuses.some(s => s.book_id === book.id && s.status === 'reading_now') ? '#ffd180' : '#eee',
+                             marginLeft: 4,
+                             fontWeight: myStatuses.some(s => s.book_id === book.id && s.status === 'reading_now') ? 'bold' : 'normal'
+                           }}
+                         >{myStatuses.some(s => s.book_id === book.id && s.status === 'reading_now') ? 'Reading Now (Undo)' : 'Reading Now'} ({book.reading_now || 0})</button>
+                         <button
+                           onClick={() => handleStatus(book.id, 'skimmed')}
+                           disabled={!user}
+                           style={{
+                             background: myStatuses.some(s => s.book_id === book.id && s.status === 'skimmed') ? '#fff9c4' : '#eee',
+                             marginLeft: 4,
+                             fontWeight: myStatuses.some(s => s.book_id === book.id && s.status === 'skimmed') ? 'bold' : 'normal'
+                           }}
+                         >{myStatuses.some(s => s.book_id === book.id && s.status === 'skimmed') ? 'Skimmed (Undo)' : 'Skimmed'} ({book.skimmed || 0})</button>
+                         <button
+                           onClick={() => handleStatus(book.id, 'want_to_read')}
+                           disabled={!user}
+                           style={{
+                             background: myStatuses.some(s => s.book_id === book.id && s.status === 'want_to_read') ? '#bbdefb' : '#eee',
+                             marginLeft: 4,
+                             fontWeight: myStatuses.some(s => s.book_id === book.id && s.status === 'want_to_read') ? 'bold' : 'normal'
+                           }}
+                         >{myStatuses.some(s => s.book_id === book.id && s.status === 'want_to_read') ? 'Want to Read (Undo)' : 'Want to Read'} ({book.want_to_read || 0})</button>
+                       </div>
+                       {book.recommended_by && <div><small>Recommended by {book.recommended_by}</small></div>}
+                       {user && user.id === book.user_id && (
+                         <button
+                           style={{ marginTop: 8, background: '#e57373', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 10px', cursor: 'pointer' }}
+                           onClick={async () => {
+                            if (window.confirm('Are you sure you want to delete this book?')) {
+                              const res = await fetch(`${API_BASE}/books/${book.id}`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ user_id: user.id })
+                              });
+                              if (res.ok) {
+                                setSuccessMsg('Book deleted successfully!');
+                                fetchBooks();
+                              } else {
+                                const err = await res.json().catch(() => ({}));
+                                alert(err.error || 'Failed to delete book');
+                              }
+                            }
+                           }}
+                         >Delete</button>
+                       )}
+                       
+                       {/* Comments Section */}
+                       <div style={{ marginTop: 15, borderTop: '1px dashed #ddd', paddingTop: 10 }}>
+                         <button 
+                           onClick={() => {
+                             if (!bookComments[book.id]) {
+                               fetchComments(book.id);
+                             } else {
+                               setBookComments(prev => ({
+                                 ...prev,
+                                 [book.id]: undefined
+                               }));
+                             }
+                           }}
+                           style={{ 
+                             background: bookComments[book.id] ? '#f1f1f1' : '#e1f5fe',
+                             border: '1px solid #ccc',
+                             borderRadius: 4,
+                             padding: '4px 8px',
+                             fontSize: 14,
+                             cursor: 'pointer'
+                           }}
+                         >
+                           {bookComments[book.id] ? 'Hide Comments' : 'Show Comments'}
+                         </button>
+                         
+                         {bookComments[book.id] && (
+                           <div style={{ marginTop: 10 }}>
+                             {/* Comment form */}
+                             {user ? (
+                               <div style={{ display: 'flex', marginBottom: 10 }}>
+                                 <input
+                                   type="text"
+                                   value={commentText}
+                                   onChange={(e) => setCommentText(e.target.value)}
+                                   placeholder="Add a comment..."
+                                   style={{ flex: 1, marginRight: 8, padding: '6px 8px', borderRadius: 4, border: '1px solid #ccc' }}
+                                 />
+                                 <button
+                                   onClick={() => addComment(book.id, commentText)}
+                                   disabled={!commentText.trim()}
+                                   style={{ 
+                                     background: commentText.trim() ? '#90caf9' : '#e0e0e0',
+                                     borderRadius: 4,
+                                     border: 'none',
+                                     padding: '0 12px',
+                                     cursor: commentText.trim() ? 'pointer' : 'default'
+                                   }}
+                                 >
+                                   Comment
+                                 </button>
+                               </div>
+                             ) : (
+                               <div style={{ color: '#666', marginBottom: 10, fontStyle: 'italic' }}>
+                                 Log in to add comments
+                               </div>
+                             )}
+                             
+                             {/* Comments list */}
+                             {loadingComments ? (
+                               <div>Loading comments...</div>
+                             ) : bookComments[book.id].length > 0 ? (
+                               <div>
+                                 {bookComments[book.id].map(comment => (
+                                   <div key={comment.id} style={{ 
+                                     padding: 10, 
+                                     borderBottom: '1px solid #eee',
+                                     position: 'relative'
+                                   }}>
+                                     <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                                       {comment.user_name}
+                                       <span style={{ fontWeight: 'normal', color: '#777', fontSize: 12, marginLeft: 8 }}>
+                                         {new Date(comment.created_at).toLocaleString()}
+                                       </span>
+                                     </div>
+                                     <div style={{ wordBreak: 'break-word' }}>{comment.content}</div>
+                                     {user && user.id === comment.user_id && (
+                                       <button 
+                                         onClick={() => deleteComment(book.id, comment.id)}
+                                         style={{
+                                           position: 'absolute',
+                                           right: 5,
+                                           top: 5,
+                                           background: 'none',
+                                           border: 'none',
+                                           color: '#f44336',
+                                           cursor: 'pointer',
+                                           padding: '2px 5px',
+                                           fontSize: 12
+                                         }}
+                                       >
+                                         &times;
+                                       </button>
+                                     )}
+                                   </div>
+                                 ))}
+                               </div>
+                             ) : (
+                               <div style={{ color: '#666', fontStyle: 'italic' }}>No comments yet. Be the first to comment!</div>
+                             )}
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                   </li>
+                 );
+               })
+            )   const res = await fetch(`${API_BASE}/books/${book.id}`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ user_id: user.id })
+                              });
+                              if (res.ok) {
+{{ ... }}
+                                fetchBooks();
+                              } else {
+                                const err = await res.json().catch(() => ({}));
+                                alert('Failed to delete book: ' + (err.error || res.statusText));
+                              }
+                            }
+                          }}
+                        >Delete</button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })
+          )}
+        </ul>
+      )}
+        </div>
+    </div>
+  </div>
+);
+}
+
+export default App;
