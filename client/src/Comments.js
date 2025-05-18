@@ -1,6 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const API_BASE = 'http://localhost:4000';
+
+// Utility function to convert URLs in text to clickable links
+function linkify(text) {
+  if (!text) return '';
+  const urlRegex = /(https?:\/\/[\w\-._~:\/?#[\]@!$&'()*+,;=%]+)|(www\.[\w\-._~:\/?#[\]@!$&'()*+,;=%]+)/gi;
+  return text.replace(urlRegex, url => {
+    let href = url;
+    if (!href.startsWith('http')) {
+      href = 'http://' + href;
+    }
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
+}
 
 function Comments({ bookId, user }) {
   const [comments, setComments] = useState([]);
@@ -9,13 +22,8 @@ function Comments({ bookId, user }) {
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   
-  // Fetch comment count when component mounts or bookId changes
-  useEffect(() => {
-    fetchCommentCount();
-  }, [bookId]);
-
   // Fetch just the comment count
-  const fetchCommentCount = async () => {
+  const fetchCommentCount = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/books/${bookId}/comments/count`);
       const data = await res.json();
@@ -23,7 +31,12 @@ function Comments({ bookId, user }) {
     } catch (error) {
       console.error('Error fetching comment count:', error);
     }
-  };
+  }, [bookId]);
+
+  // Fetch comment count when component mounts or bookId changes
+  useEffect(() => {
+    fetchCommentCount();
+  }, [bookId, fetchCommentCount]);
   
   // Fetch full comments for this book
   const fetchComments = async () => {
@@ -92,9 +105,7 @@ function Comments({ bookId, user }) {
       fetchComments();
     }
     setShowComments(!showComments);
-  };
-
-  return (
+  }; return (
     <div style={{ marginTop: 15, borderTop: '1px dashed #ddd', paddingTop: 10 }}>
       <button 
         onClick={toggleComments}
@@ -194,19 +205,6 @@ function Comments({ bookId, user }) {
       )}
     </div>
   );
-}
-
-// Utility function to convert URLs in text to clickable links
-function linkify(text) {
-  if (!text) return '';
-  const urlRegex = /(https?:\/\/[\w\-._~:/?#[\]@!$&'()*+,;=%]+)|(www\.[\w\-._~:/?#[\]@!$&'()*+,;=%]+)/gi;
-  return text.replace(urlRegex, url => {
-    let href = url;
-    if (!href.startsWith('http')) {
-      href = 'http://' + href;
-    }
-    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${url}</a>`;
-  });
 }
 
 export default Comments;

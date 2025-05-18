@@ -122,26 +122,6 @@ function App() {
     setMyStatuses(await statusesRes.json());
   };
 
-  // Login handler
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    if (!loginName) return;
-    const res = await fetch(`${API_BASE}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: loginName }),
-    });
-    if (res.status === 404) {
-      alert('User not found. Please register.');
-      return;
-    }
-    const data = await res.json();
-    setUser(data);
-    window.localStorage.setItem('user', JSON.stringify(data));
-    setLoginName('');
-    fetchUserSpecific(data.id);
-  };
-
   // Register handler
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -190,7 +170,7 @@ function App() {
 
     // Normalize categories (lowercase, split into words)
     const normalizedCategories = categories.flatMap(category => 
-      category.toLowerCase().split(/[\s&,\/]+/)
+      category.toLowerCase().split(/[\s&,/]+/)
     );
 
     // Common category keywords to look for
@@ -368,15 +348,6 @@ function App() {
     }
   };
 
-  // Handle topic checkbox
-  const handleTopicChange = (topicId) => {
-    setForm((prev) => {
-      const topics = prev.topics.includes(topicId)
-        ? prev.topics.filter((id) => id !== topicId)
-        : [...prev.topics, topicId];
-      return { ...prev, topics };
-    });
-  };
 
   // Filter books
   const filteredBooks = filter
